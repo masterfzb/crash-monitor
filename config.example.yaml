@@ -1,0 +1,31 @@
+# Crash Monitor 配置示例
+# 复制为 config.yaml 后修改
+
+monitors:
+  - name: "my-web-server"
+    command: "python -m http.server 8080"
+    working_dir: "/path/to/project"
+    pid_file: "/tmp/my-web-server.pid"
+    restart:
+      enabled: true
+      max_restarts: 5          # 最大自动重启次数
+      cooldown_seconds: 10     # 重启冷却
+    health_check:
+      type: http
+      url: "http://localhost:8080/health"
+      interval_seconds: 30
+      timeout_seconds: 5
+
+  - name: "my-worker"
+    command: "node worker.js"
+    working_dir: "/path/to/worker"
+    restart:
+      enabled: true
+      max_restarts: 3
+      cooldown_seconds: 15
+    # 无 health_check 则仅检查进程存活
+
+alerts:
+  webhook:
+    url: "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=YOUR_KEY"
+    type: wecom  # wecom | feishu | discord
