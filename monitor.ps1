@@ -105,6 +105,9 @@ $header = "monitor_v2.2 host=$script:Hostname interval=${IntervalSec}s pid=$PID"
 write-round "START $header at $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
 
 $round = 0
+$lastCleanup = [DateTime]::MinValue
+$cleanupAgeMin = 30  # keep last 30 min of round files
+
 while ($MaxRounds -eq 0 -or $round -lt $MaxRounds) {
     $round++
     $ts = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
@@ -119,6 +122,16 @@ while ($MaxRounds -eq 0 -or $round -lt $MaxRounds) {
 
     $line = "[$ts] R$round $gpu $ram $upt $nvme $kp41 $edge $top"
     write-round $line
+
+    # Cleanup old round files every ~30 min (keeps last 30 min)
+    if (([DateTime]::Now - $lastCleanup).TotalMinutes -ge 30) {
+        $lastCleanup = [DateTime]::Now
+        foreach ($root in @($script:RootC, $script:RootD)) {
+            Get-ChildItem $root -Recurse -File -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -ne 'LATEST.txt' -and $_.LastWriteTime -lt [DateTime]::Now.AddMinutes(-$cleanupAgeMin) } |
+                Remove-Item -Force -ErrorAction SilentlyContinue
+        }
+    }
 
     Start-Sleep -Seconds $IntervalSec
 }
