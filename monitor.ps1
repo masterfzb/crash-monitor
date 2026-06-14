@@ -1,39 +1,44 @@
-# Crash Monitor v2.1 — Minimal-impact, crash-safe system heartbeat
-# Design: atomic round files on D:\ (independent SATA disk) + LATEST.txt marker
-# Usage: powershell -NoProfile -ExecutionPolicy Bypass -File monitor.ps1 [-IntervalSec 15] [-LogRoot "D:\..."] [-MaxRounds 0]
+# Crash Monitor v2.2 — Dual-disk, crash-safe heartbeat
+# Writes to BOTH C:\ (NVMe, Desktop) and D:\ (SATA HDD). If one copy stops while
+# the other continues → the stopped drive is the crash locus.
+# Usage: powershell -NoProfile -ExecutionPolicy Bypass -File monitor.ps1 [-IntervalSec 60] [-MaxRounds 0]
 param(
-    [int]$IntervalSec = 15,
-    [int]$MaxRounds = 0,  # 0 = run until killed or crash
-    [string]$LogRoot = 'D:\crash-monitor-logs'
+    [int]$IntervalSec = 60,
+    [int]$MaxRounds = 0
 )
 
 $ErrorActionPreference = 'SilentlyContinue'
-$script:LogRoot = $LogRoot
 $script:Hostname = $env:COMPUTERNAME
-$script:LatestFile = Join-Path $script:LogRoot 'LATEST.txt'
+
+# Dual output roots — same data, two physical disks
+$script:RootC = "$env:USERPROFILE\Desktop\crash-monitor-logs"  # NVMe SSD
+$script:RootD = 'D:\crash-monitor-logs'                        # SATA HDD (survives NVMe failure)
 
 # ---- helpers ----
 
 function atomic-write($path, $text) {
-    # WriteAllText is atomic: file appears complete or not at all
-    # Writes to D:\ (independent SATA controller, survives NVMe failure)
     $dir = Split-Path $path -Parent
     [void](New-Item $dir -ItemType Directory -Force)
     [System.IO.File]::WriteAllText($path, $text, [System.Text.Encoding]::UTF8)
 }
 
 function write-round($text) {
-    # 1. Per-round archive file: D:\crash-monitor-logs\YYYY-MM-DD\HH-MM-SS.txt
     $now = [DateTime]::Now
-    $roundPath = Join-Path $script:LogRoot "$($now.ToString('yyyy-MM-dd'))\$($now.ToString('HH-mm-ss')).txt"
-    atomic-write $roundPath $text
+    $dateDir = $now.ToString('yyyy-MM-dd')
+    $timeFile = $now.ToString('HH-mm-ss') + '.txt'
 
-    # 2. LATEST.txt: fixed single-line marker for post-crash quick glance
-    atomic-write $script:LatestFile $text
+    # D: first (more likely to survive)
+    $dPath = Join-Path $script:RootD "$dateDir\$timeFile"
+    atomic-write $dPath $text
+    atomic-write (Join-Path $script:RootD 'LATEST.txt') $text
+
+    # C: Desktop (NVMe — stopped = NVMe issue)
+    $cPath = Join-Path $script:RootC "$dateDir\$timeFile"
+    atomic-write $cPath $text
+    atomic-write (Join-Path $script:RootC 'LATEST.txt') $text
 }
 
 function get-gpu-snapshot {
-    # Single nvidia-smi call — fast, stable, no WMI perf counters
     $lines = & 'nvidia-smi' --query-gpu=timestamp,temperature.gpu,utilization.gpu,utilization.memory,memory.used,power.draw,clocks.current.sm,clocks.current.memory --format=csv,noheader 2>$null
     if (-not $lines) { return 'GPU:n/a' }
     $f = ($lines[0] -split ', ').Trim()
@@ -70,9 +75,31 @@ function get-top-cpu-proc {
     if ($top) { "top:$($top.ProcessName)" } else { 'top:n/a' }
 }
 
+function get-nvme-errors {
+    # Check for recent NVMe controller resets (stornvme 129)
+    # This is THE key metric for the current crash scenario
+    $c = @(Get-WinEvent -FilterHashtable @{
+        LogName='System'; Id=129; ProviderName='stornvme'
+        StartTime=(Get-Date).AddMinutes(-5)
+    } -MaxEvents 5 -ErrorAction SilentlyContinue).Count
+    "nvme:${c}r5m"
+}
+
+function get-kernel-errors {
+    # Kernel-Power 41 count since boot — unexpected reboots
+    $os = Get-CimInstance Win32_OperatingSystem -Property LastBootUpTime -ErrorAction SilentlyContinue
+    if ($os -and $os.LastBootUpTime) {
+        $c = @(Get-WinEvent -FilterHashtable @{
+            LogName='System'; Id=41; ProviderName='Microsoft-Windows-Kernel-Power'
+            StartTime=$os.LastBootUpTime
+        } -MaxEvents 20 -ErrorAction SilentlyContinue).Count
+        "kp41:${c}"
+    } else { 'kp41:n/a' }
+}
+
 # ---- main loop ----
 
-$header = "monitor_v2.1 host=$script:Hostname interval=${IntervalSec}s pid=$PID logroot=$script:LogRoot"
+$header = "monitor_v2.2 host=$script:Hostname interval=${IntervalSec}s pid=$PID"
 write-round "START $header at $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
 
 $round = 0
@@ -80,13 +107,15 @@ while ($MaxRounds -eq 0 -or $round -lt $MaxRounds) {
     $round++
     $ts = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
 
-    $gpu  = get-gpu-snapshot
-    $ram  = get-cpu-ram
-    $edge = get-edge-count
-    $upt  = get-uptime
-    $top  = get-top-cpu-proc
+    $gpu   = get-gpu-snapshot
+    $ram   = get-cpu-ram
+    $edge  = get-edge-count
+    $upt   = get-uptime
+    $top   = get-top-cpu-proc
+    $nvme  = get-nvme-errors
+    $kp41  = get-kernel-errors
 
-    $line = "[$ts] R$round $gpu $ram $upt $edge $top"
+    $line = "[$ts] R$round $gpu $ram $upt $nvme $kp41 $edge $top"
     write-round $line
 
     Start-Sleep -Seconds $IntervalSec
