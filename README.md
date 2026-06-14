@@ -1,32 +1,32 @@
-# Crash Monitor v2
+# Crash Monitor v2.1
 
-Minimal-impact system heartbeat monitor. Designed to survive system hangs and crashes.
+Minimal-impact, crash-safe system heartbeat. **Survives NVMe failure** — writes to independent SATA disk.
 
 ## Design
 
-- **Atomic round files**: each heartbeat is a separate file (`logs/YYYY-MM-DD/HH-MM-SS.txt`). If the system crashes mid-write, only the current file is lost — all previous rounds are intact.
-- **No performance counters**: avoids `Get-Counter` and disk I/O counters, which are known to cause Windows hangs when the counter subsystem is corrupted.
-- **Minimal system calls**: one `nvidia-smi` query, one WMI call, one process list — fast and stable.
-- **30-second heartbeat**: frequent enough to catch crashes, sparse enough to have near-zero system impact.
+- **D: drive output** — separate SATA HDD, immune to NVMe controller hangs
+- **Atomic round files** — `D:\crash-monitor-logs\YYYY-MM-DD\HH-MM-SS.txt` each heartbeat
+- **LATEST.txt** — `D:\crash-monitor-logs\LATEST.txt` always contains the most recent snapshot; quick post-crash glance
+- **No performance counters** — avoids `Get-Counter` (known to cause Windows hangs)
+- **15-second heartbeat** — catches crashes, near-zero system impact
+- **Minimal system calls** — single `nvidia-smi`, one WMI, one process list
 
 ## Usage
 
 ```powershell
-# Run with default 30-second interval, until killed
+# Double-click run_monitor.bat, or:
 powershell -NoProfile -ExecutionPolicy Bypass -File monitor.ps1
 
-# Custom interval, fixed number of rounds
-powershell -NoProfile -ExecutionPolicy Bypass -File monitor.ps1 -IntervalSec 60 -MaxRounds 120
+# Custom interval + path:
+powershell -NoProfile -ExecutionPolicy Bypass -File monitor.ps1 -IntervalSec 30 -LogRoot "E:\monitor"
 ```
 
-## Log Format
+## Post-Crash
 
-Each round file contains a single line:
+After reboot, open `D:\crash-monitor-logs\LATEST.txt` — the last recorded heartbeat before the system froze.
+
+## Log Format
 
 ```
 [2026-06-15 00:23:45] R42 GPU:38°C|0%|252MiB|22W|210MHz/405MHz RAM:5.1/31.8G U:0d0h26m edge:16p top:msedge
 ```
-
-## Why v2 Exists
-
-v1 ran at 4-second intervals with full disk performance counters and two parallel instances. At 00:12:57 the disk I/O hit 1486% and the system hung. v2 exists so that never happens again.
