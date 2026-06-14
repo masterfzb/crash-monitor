@@ -39,10 +39,12 @@ function write-round($text) {
 }
 
 function get-gpu-snapshot {
-    $lines = & 'nvidia-smi' --query-gpu=timestamp,temperature.gpu,utilization.gpu,utilization.memory,memory.used,power.draw,clocks.current.sm,clocks.current.memory --format=csv,noheader 2>$null
-    if (-not $lines) { return 'GPU:n/a' }
-    $f = ($lines[0] -split ', ').Trim()
-    "GPU:${f[1]}°C|${f[2]}|${f[4]}|${f[5]}|${f[6]}MHz/${f[7]}MHz"
+    $lines = & 'C:\Windows\system32\nvidia-smi.exe' --query-gpu=timestamp,temperature.gpu,utilization.gpu,utilization.memory,memory.used,power.draw,clocks.current.sm,clocks.current.memory --format=csv,noheader 2>$null
+    if (-not $lines -or $lines.Count -eq 0) { return 'GPU:n/a' }
+    $raw = if ($lines -is [array]) { $lines[0] } else { $lines.ToString() }
+    $f = ($raw -split ',').ForEach({ $_.Trim() })
+    if ($f.Count -lt 8) { return "GPU:raw($($f.Count)f)" }
+    "GPU:${f[1]}C|${f[2]}|${f[4]}|${f[5]}|${f[6]}/${f[7]}"
 }
 
 function get-cpu-ram {
