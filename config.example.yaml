@@ -1,6 +1,7 @@
 # Crash Monitor 配置示例
 # 复制为 config.yaml 后修改
 
+# ── 进程监控（原有功能）──
 monitors:
   - name: "my-web-server"
     command: "python -m http.server 8080"
@@ -8,8 +9,8 @@ monitors:
     pid_file: "/tmp/my-web-server.pid"
     restart:
       enabled: true
-      max_restarts: 5          # 最大自动重启次数
-      cooldown_seconds: 10     # 重启冷却
+      max_restarts: 5
+      cooldown_seconds: 10
     health_check:
       type: http
       url: "http://localhost:8080/health"
@@ -23,8 +24,42 @@ monitors:
       enabled: true
       max_restarts: 3
       cooldown_seconds: 15
-    # 无 health_check 则仅检查进程存活
 
+# ── Windows 服务看门狗（新增）──
+windows_service_watchdog:
+  enabled: true
+  heartbeat_interval: 5          # 心跳间隔（秒）
+  log_dir: "D:\\crash-monitor\\logs"          # 日志目录（强制非 C 盘！）
+  status_dir: "D:\\crash-monitor\\status"      # 状态文件目录
+  snapshot_dir: "D:\\crash-monitor\\snapshots" # 故障快照目录
+
+  # 监控的 Windows 系统服务
+  services:
+    - { name: "DcomLaunch",          display: "DCOM 服务启动器",    critical: true }
+    - { name: "RpcSs",               display: "RPC 远程调用",       critical: true }
+    - { name: "EventLog",            display: "Windows 事件日志",  critical: true }
+    - { name: "ShellHWDetection",    display: "Shell 硬件检测",    critical: true }
+    - { name: "UserManager",         display: "用户管理器",        critical: true }
+    - { name: "BFE",                 display: "基础过滤引擎",      critical: true }
+    - { name: "Power",               display: "电源服务",          critical: true }
+    - { name: "CoreMessagingRegistrar", display: "核心消息注册",   critical: true }
+    - { name: "StateRepository",     display: "状态存储库",        critical: true }
+    - { name: "WpnUserService",      display: "通知推送服务",      critical: false }
+
+  # 监控的关键系统进程
+  processes:
+    - { name: "explorer.exe",              display: "资源管理器(Shell)",  critical: true }
+    - { name: "StartMenuExperienceHost.exe",display: "开始菜单宿主",      critical: true }
+    - { name: "SearchHost.exe",            display: "搜索服务",           critical: false }
+    - { name: "ShellExperienceHost.exe",   display: "Shell体验宿主",     critical: true }
+    - { name: "SystemSettings.exe",        display: "系统设置",           critical: false }
+
+# ── 可视化仪表板 ──
+dashboard:
+  enabled: true
+  port: 19998
+
+# ── 告警通知 ──
 alerts:
   webhook:
     url: "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=YOUR_KEY"

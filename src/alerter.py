@@ -117,6 +117,73 @@ class Alerter:
         }
         self._post(payload)
 
+    # ── 服务看门狗告警 ──────────────────────────────
+
+    def send_service_alert(
+        self,
+        failures: list[str],
+        service_states: list[dict] = None,
+        process_states: list[dict] = None,
+        recovered: bool = False,
+    ):
+        """发送服务/进程异常告警."""
+        if not self.webhook_url:
+            return
+
+        if recovered:
+            self._send_generic(
+                title="✅ 系统恢复正常",
+                color=0x00FF00,
+                fields=[{"name": "状态", "value": "所有关键服务和进程已恢复"}],
+            )
+            return
+
+        # 构建告警内容
+        failure_text = "\n".join(f"- {f}" for f in failures[:10])
+
+        fields = [
+            {"name": "异常项", "value": failure_text, "inline": False},
+        ]
+
+        # 附加服务状态摘要
+        if service_states:
+            bad_svcs = [s for s in service_states if s.get("status") != "running"]
+            if bad_svcs:
+                fields.append({
+                    "name": "异常服务",
+                    "value": ", ".join(f"{s['display']}({s['status']})" for s in bad_svcs[:5]),
+                    "inline": False,
+                })
+
+        # 附加进程状态
+        if process_states:
+            dead_procs = [p for p in process_states if not p.get("running")]
+            if dead_procs:
+                fields.append({
+                    "name": "死亡进程",
+                    "value": ", ".join(p["display"] for p in dead_procs[:5]),
+                    "inline": False,
+                })
+
+        self._send_generic(
+            title="🚨 Windows 系统服务异常",
+            color=0xFF0000,
+            fields=fields,
+        )
+
+    def _send_generic(self, title: str, color: int, fields: list[dict]):
+        """通用告警发送（自动选择平台）."""
+        if self.webhook_type == "wecom":
+            lines = [f"## {title}"]
+            for f in fields:
+                lines.append(f"> {f['name']}: {f['value']}")
+            self._post({"msgtype": "markdown", "markdown": {"content": "\n".join(lines)}})
+        elif self.webhook_type == "discord":
+            self._post({"embeds": [{"title": title, "color": color, "fields": fields}]})
+        elif self.webhook_type == "feishu":
+            content = "\n".join(f"**{f['name']}**: {f['value']}" for f in fields)
+            self._post({"msg_type": "text", "content": {"text": f"{title}\n{content}"}})
+
     def _post(self, payload: dict):
         """发送 HTTP POST."""
         try:
