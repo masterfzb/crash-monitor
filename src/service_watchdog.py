@@ -202,7 +202,7 @@ class WindowsServiceWatchdog:
         try:
             result = subprocess.run(
                 ["sc", "query", service_name],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10,
                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
             )
             output = result.stdout + result.stderr
@@ -231,7 +231,7 @@ class WindowsServiceWatchdog:
                 result = subprocess.run(
                     ["tasklist", "/FI", f"IMAGENAME eq {process_name}",
                      "/FO", "CSV", "/NH"],
-                    capture_output=True, text=True, timeout=10,
+                    capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10,
                     creationflags=subprocess.CREATE_NO_WINDOW,
                 )
                 if process_name.lower() in result.stdout.lower():
@@ -250,7 +250,7 @@ class WindowsServiceWatchdog:
                 # 非 Windows: 用 pgrep
                 result = subprocess.run(
                     ["pgrep", "-f", process_name],
-                    capture_output=True, text=True, timeout=10,
+                    capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10,
                 )
                 if result.returncode == 0:
                     pids = result.stdout.strip().split("\n")
@@ -261,15 +261,30 @@ class WindowsServiceWatchdog:
             return (False, 0)
 
     def _check_shutdown_accessible(self) -> tuple[bool, str]:
-        """测试 shutdown 命令是否可用 — 检查 shutdown.exe 文件是否存在."""
+        """测试 shutdown 命令是否可用.
+        
+        在中文 Windows 上 shutdown /? 返回 rc=1 且 GBK 输出触发编码错误，
+        因此改用检查 shutdown.exe 文件是否存在 + 静默调用测试。
+        """
+        # 先检查 shutdown.exe 文件存在
+        shutdown_paths = [
+            os.path.join(os.environ.get("SystemRoot", "C:\\Windows"), "System32", "shutdown.exe"),
+            "C:\\Windows\\System32\\shutdown.exe",
+        ]
+        exists = any(os.path.isfile(p) for p in shutdown_paths)
+        if not exists:
+            return (False, "shutdown.exe 文件不存在")
+
+        # 静默调用测试（忽略返回码和输出，只测试命令可执行）
         try:
-            import shutil
-            shutdown_path = shutil.which("shutdown") or (
-                r"C:\Windows\System32\shutdown.exe" if os.name == "nt" else "/sbin/shutdown"
+            subprocess.run(
+                ["shutdown", "/?"],
+                capture_output=True, timeout=5,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
             )
-            if os.path.exists(shutdown_path):
-                return (True, f"shutdown.exe 存在 ({shutdown_path})")
-            return (False, f"shutdown.exe 未找到")
+            return (True, "shutdown.exe 可用")
+        except FileNotFoundError:
+            return (False, "shutdown 命令未找到")
         except Exception as e:
             return (False, str(e))
 
@@ -289,7 +304,7 @@ class WindowsServiceWatchdog:
             if os.name == "nt":
                 result = subprocess.run(
                     ["tasklist", "/FO", "CSV", "/NH"],
-                    capture_output=True, text=True, timeout=15,
+                    capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15,
                     creationflags=subprocess.CREATE_NO_WINDOW,
                 )
                 # 只取进程名
@@ -302,7 +317,7 @@ class WindowsServiceWatchdog:
             else:
                 result = subprocess.run(
                     ["ps", "aux", "--no-headers"],
-                    capture_output=True, text=True, timeout=15,
+                    capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15,
                 )
                 return result.stdout.strip().split("\n")[:500]
         except Exception:
