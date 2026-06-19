@@ -261,16 +261,15 @@ class WindowsServiceWatchdog:
             return (False, 0)
 
     def _check_shutdown_accessible(self) -> tuple[bool, str]:
-        """测试 shutdown 命令是否可用."""
+        """测试 shutdown 命令是否可用 — 检查 shutdown.exe 文件是否存在."""
         try:
-            result = subprocess.run(
-                ["shutdown", "/?"],
-                capture_output=True, text=True, timeout=5,
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            import shutil
+            shutdown_path = shutil.which("shutdown") or (
+                r"C:\Windows\System32\shutdown.exe" if os.name == "nt" else "/sbin/shutdown"
             )
-            if result.returncode == 0 and "用法" in result.stdout or "Usage" in result.stdout:
-                return (True, "")
-            return (False, f"shutdown 返回异常: rc={result.returncode}")
+            if os.path.exists(shutdown_path):
+                return (True, f"shutdown.exe 存在 ({shutdown_path})")
+            return (False, f"shutdown.exe 未找到")
         except Exception as e:
             return (False, str(e))
 

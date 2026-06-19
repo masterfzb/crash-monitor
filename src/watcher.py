@@ -12,7 +12,7 @@ from .logger import get_logger
 log = get_logger(__name__)
 
 # 设置本地时区
-TZ = timezone(offset=timezone.utc.utcoffset(None) or timezone.utc)
+TZ = datetime.now().astimezone().tzinfo or timezone.utc
 
 
 @dataclass
